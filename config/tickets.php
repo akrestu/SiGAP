@@ -10,6 +10,12 @@ return [
     'triage_min_level' => 4,
 
     /*
+    | Tiket belum diambil siapa pun saat porsi waktu SLA respons ini sudah terpakai → eskalasi
+    | (notifikasi ke tim IT site + triager). 0.5 = separuh waktu respons.
+    */
+    'escalate_at' => 0.5,
+
+    /*
     | Hari kerja layanan IT (ISO: 1 = Senin ... 7 = Minggu) dan jam kerja.
     */
     'working_days' => [1, 2, 3, 4, 5, 6],

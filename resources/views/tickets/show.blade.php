@@ -2,7 +2,10 @@
 @php
     $isStaff = $canViewInternal;
     $canAssign = auth()->user()->can('assign', App\Models\Ticket::class) && \App\Services\TicketWorkflow::canBeAssigned($ticket);
-    $hasActions = $canAssign || count($transitions) > 0;
+    $canClaim = auth()->user()->can('claim', $ticket);
+    $hasActions = $canClaim || $canAssign || count($transitions) > 0;
+    // Teknisi tanpa aksi lain: tombol "Ambil" langsung di sticky bar mobile, tanpa bottom sheet
+    $claimOnly = $canClaim && ! $canAssign && count($transitions) === 0;
     $backUrl = auth()->user()->can('viewAny', App\Models\Ticket::class) ? route('tickets.index') : route('tickets.mine');
 @endphp
 
@@ -149,7 +152,9 @@
 
             <section class="card p-3 mb-3" aria-labelledby="history-title">
                 <h2 id="history-title" class="h6 fw-bold mb-1">Riwayat</h2>
-                <p class="small text-muted">Ditangani: <strong>{{ $ticket->assignedUser->name ?? '—' }}</strong></p>
+                <p class="small text-muted">Ditangani: <strong>{{ $ticket->assignedUser->name ?? '—' }}</strong>
+                    @if ($ticket->assignedUser?->isAway())<span class="sg-badge sg-badge--pending ms-1">Cuti s.d. {{ \App\Support\Format::date($ticket->assignedUser->away_until) }}</span>@endif
+                </p>
                 @include('tickets.partials.timeline')
             </section>
         </aside>
@@ -158,9 +163,16 @@
     {{-- Mobile: aksi tim IT lewat bottom sheet --}}
     @if ($hasActions)
         <x-sg.sticky-actions>
-            <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#ticket-actions">
-                <i class="bi bi-lightning-charge" aria-hidden="true"></i> Tindakan
-            </button>
+            @if ($claimOnly)
+                <form action="{{ route('tickets.claim', $ticket) }}" method="POST" class="w-100">
+                    @csrf
+                    <button type="submit" class="btn btn-primary w-100"><i class="bi bi-hand-index" aria-hidden="true"></i> {{ $ticket->assigned_to ? 'Ambil alih tiket' : 'Ambil tiket' }}</button>
+                </form>
+            @else
+                <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#ticket-actions">
+                    <i class="bi bi-lightning-charge" aria-hidden="true"></i> Tindakan
+                </button>
+            @endif
         </x-sg.sticky-actions>
         <x-sg.sheet id="ticket-actions" title="Tindakan tiket">
             @include('tickets.partials.staff-actions', ['sfx' => 'm'])

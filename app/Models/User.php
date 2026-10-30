@@ -32,6 +32,9 @@ class User extends Authenticatable
         'department_id',
         'job_site_id',
         'notification_preferences',
+        'away_from',
+        'away_until',
+        'away_note',
     ];
 
     /**
@@ -55,6 +58,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'notification_preferences' => 'json',
+            'away_from' => 'date',
+            'away_until' => 'date',
         ];
     }
 
@@ -117,6 +122,14 @@ class User extends Authenticatable
     public function coversJobSite($jobSiteId): bool
     {
         return $jobSiteId !== null && in_array((int) $jobSiteId, $this->jobSiteIds(), true);
+    }
+
+    /** Sedang cuti / tidak tersedia (diisi sendiri di profil). Tanpa tanggal mulai = berlaku sejak sekarang. */
+    public function isAway(): bool
+    {
+        return $this->away_until !== null
+            && today()->lte($this->away_until)
+            && ($this->away_from === null || today()->gte($this->away_from));
     }
 
     /** Sinkronkan site tambahan (site utama otomatis dikeluarkan) */

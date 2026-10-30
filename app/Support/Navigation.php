@@ -59,8 +59,12 @@ class Navigation
         if (! $user->isAdmin()) {
             $services[] = $this->item('tickets-mine', 'Tiket Saya', 'bi-ticket-perforated', 'tickets.mine', ['tickets.mine', 'tickets.create']);
         }
+        if (TicketPolicy::isHandler($user)) {
+            // Badge = tiket baru yang belum diambil di site yang dicakup user
+            $unclaimed = Ticket::visibleTo($user)->where('status', Ticket::STATUS_OPEN)->whereNull('assigned_to')->count();
+            $services[] = $this->item('tickets', 'Tiket Masuk', 'bi-inbox', 'tickets.index', ['tickets.index', 'tickets.show'], $unclaimed);
+        }
         if (TicketPolicy::isTriager($user)) {
-            $services[] = $this->item('tickets', 'Tiket Masuk', 'bi-inbox', 'tickets.index', ['tickets.index', 'tickets.show'], Ticket::where('status', Ticket::STATUS_OPEN)->count());
             $services[] = $this->item('tickets-kpi', 'Dashboard Tiket', 'bi-graph-up', 'tickets.dashboard', ['tickets.dashboard']);
         }
         if (! $user->isAdmin() && ! $user->isLevel8()) {

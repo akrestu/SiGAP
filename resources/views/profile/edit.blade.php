@@ -5,7 +5,10 @@
         'profile-updated' => 'Data diri disimpan',
         'password-updated' => 'Kata sandi diperbarui',
         'profile-picture-updated' => 'Foto profil diperbarui',
+        'availability-updated' => 'Status cuti disimpan',
+        'availability-cleared' => 'Status cuti dihapus, Anda kembali tersedia',
     ][session('status')] ?? null;
+    $isTicketHandler = \App\Policies\TicketPolicy::isHandler($user);
     $notifTypes = [
         'job_approved' => ['Laporan disetujui', 'bi-check-circle'],
         'job_rejected' => ['Laporan ditolak', 'bi-x-circle'],
@@ -139,6 +142,55 @@
                 </section>
             </div>
         </div>
+
+        {{-- Status cuti tim IT: tiket aktif bisa diambil alih rekan site, notifikasi antrian dilewati --}}
+        @if ($isTicketHandler)
+            <section class="card p-3 p-lg-4 mt-3" aria-labelledby="away-title">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                    <h2 id="away-title" class="h6 fw-bold mb-0">Status cuti</h2>
+                    @if ($user->isAway())
+                        <span class="sg-badge sg-badge--pending">Cuti s.d. {{ \App\Support\Format::date($user->away_until) }}</span>
+                    @elseif ($user->away_until && $user->away_until->gte(today()))
+                        <span class="sg-badge sg-badge--open">Terjadwal {{ \App\Support\Format::date($user->away_from) }}</span>
+                    @else
+                        <span class="sg-badge sg-badge--approved">Tersedia</span>
+                    @endif
+                </div>
+                <p class="small text-muted">Selama cuti, tiket yang Anda tangani bisa diambil alih rekan tim IT di site Anda, dan Anda tidak menerima notifikasi antrian tiket.</p>
+                <form action="{{ route('profile.availability') }}" method="POST">
+                    @csrf
+                    @method('PATCH')
+                    <div class="row g-2">
+                        <div class="col-sm-6">
+                            <label for="away_from" class="form-label fw-semibold">Mulai</label>
+                            <input id="away_from" type="date" name="away_from" class="form-control @error('away_from') is-invalid @enderror"
+                                   value="{{ old('away_from', optional($user->away_from)->format('Y-m-d')) }}">
+                            <div class="form-text">Kosongkan = mulai hari ini.</div>
+                            @error('away_from')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="away_until" class="form-label fw-semibold">Sampai <span class="text-danger">*</span></label>
+                            <input id="away_until" type="date" name="away_until" min="{{ today()->format('Y-m-d') }}" required
+                                   class="form-control @error('away_until') is-invalid @enderror"
+                                   value="{{ old('away_until', optional($user->away_until)->format('Y-m-d')) }}">
+                            @error('away_until')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                        <div class="col-12">
+                            <label for="away_note" class="form-label fw-semibold">Keterangan</label>
+                            <input id="away_note" name="away_note" maxlength="255" class="form-control @error('away_note') is-invalid @enderror"
+                                   value="{{ old('away_note', $user->away_note) }}" placeholder="Mis. cuti tahunan, dinas luar">
+                            @error('away_note')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
+                    </div>
+                    <div class="d-flex flex-column flex-sm-row gap-2 mt-3">
+                        <button type="submit" class="btn btn-primary flex-fill">Simpan status cuti</button>
+                        @if ($user->away_until)
+                            <button type="submit" name="clear" value="1" formnovalidate class="btn btn-outline-secondary flex-fill">Saya sudah kembali</button>
+                        @endif
+                    </div>
+                </form>
+            </section>
+        @endif
 
         {{-- Akun --}}
         <section class="card p-3 p-lg-4 mt-3" aria-labelledby="acc-title">

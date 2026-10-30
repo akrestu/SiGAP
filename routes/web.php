@@ -66,6 +66,7 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
     Route::post('/profile/picture', [ProfileController::class, 'updateProfilePicture'])->name('profile.update-picture');
+    Route::patch('/profile/availability', [ProfileController::class, 'updateAvailability'])->name('profile.availability');
     
     // Notification Routes
     Route::get('/notifications', [\App\Http\Controllers\NotificationController::class, 'getNotifications'])->name('notifications.get');
@@ -125,6 +126,7 @@ Route::middleware('auth')->group(function () {
     Route::get('tickets/dashboard', [\App\Http\Controllers\TicketDashboardController::class, 'index'])->name('tickets.dashboard');
     Route::resource('tickets', TicketController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::post('tickets/{ticket}/assign', [TicketController::class, 'assign'])->name('tickets.assign');
+    Route::post('tickets/{ticket}/claim', [TicketController::class, 'claim'])->name('tickets.claim');
     Route::post('tickets/{ticket}/status', [TicketController::class, 'updateStatus'])->name('tickets.update-status');
     Route::post('tickets/{ticket}/comment', [TicketController::class, 'addComment'])->name('tickets.comment');
     Route::post('tickets/{ticket}/respond', [TicketController::class, 'respond'])->name('tickets.respond');

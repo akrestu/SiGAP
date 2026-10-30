@@ -2,10 +2,10 @@
 @php
     $rows = $jobSites->getCollection();
     $toItem = fn ($s) => ['id' => $s->id, 'name' => $s->name, 'code' => $s->code, 'location' => (string) $s->location,
-        'description' => (string) $s->description, 'is_active' => (bool) $s->is_active, 'reports' => $s->daily_reports_count];
+        'description' => (string) $s->description, 'is_active' => (bool) $s->is_active, 'ticket_self_claim' => (bool) $s->ticket_self_claim, 'reports' => $s->daily_reports_count];
     $reopen = $errors->any() && old('_sheet') !== null
         ? ['mode' => old('_sheet') ? 'edit' : 'create', 'item' => ['id' => old('_sheet'), 'name' => old('name'), 'code' => old('code'),
-            'location' => old('location'), 'description' => old('description'), 'is_active' => (bool) old('is_active')]]
+            'location' => old('location'), 'description' => old('description'), 'is_active' => (bool) old('is_active'), 'ticket_self_claim' => (bool) old('ticket_self_claim')]]
         : null;
     $badge = fn ($active) => '<span class="sg-badge sg-badge--'.($active ? 'approved' : 'closed').'">'.($active ? 'Aktif' : 'Nonaktif').'</span>';
 @endphp
@@ -16,7 +16,7 @@
 
         <x-sg.page-header title="Job Site" :subtitle="\App\Support\Format::number($jobSites->total()).' lokasi kerja'">
             <x-slot:actions>
-                <button type="button" class="btn btn-primary" @click="create({ is_active: true })"><i class="bi bi-plus-lg" aria-hidden="true"></i> Job site baru</button>
+                <button type="button" class="btn btn-primary" @click="create({ is_active: true, ticket_self_claim: true })"><i class="bi bi-plus-lg" aria-hidden="true"></i> Job site baru</button>
             </x-slot:actions>
         </x-sg.page-header>
 
@@ -114,6 +114,12 @@
                     <input class="form-check-input" type="checkbox" role="switch" id="s-active" x-model="item.is_active">
                     <label class="form-check-label" for="s-active">Aktif (bisa dipilih di laporan)</label>
                 </div>
+                <div class="form-check form-switch mb-1">
+                    <input type="hidden" name="ticket_self_claim" :value="item.ticket_self_claim ? 1 : 0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="s-self-claim" x-model="item.ticket_self_claim">
+                    <label class="form-check-label" for="s-self-claim">Tim IT bisa ambil tiket sendiri</label>
+                </div>
+                <p class="small text-muted mb-3">Matikan untuk mode dispatcher (mis. HO/RO): tiket hanya ditugaskan oleh lead/triager.</p>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-outline-secondary flex-fill" data-bs-dismiss="modal">Batal</button>
                     <button type="submit" class="btn btn-primary flex-fill">Simpan</button>

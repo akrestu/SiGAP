@@ -22,7 +22,9 @@ class TicketController extends Controller
     {
         $this->authorize('viewAny', Ticket::class);
 
+        $user = Auth::user();
         $query = Ticket::with(['category', 'assignedUser', 'jobPlan'])
+            ->visibleTo($user)
             ->orderByRaw(self::orderByList('status', array_keys(Ticket::STATUSES)))
             ->orderByRaw(self::orderByList('priority', array_keys(Ticket::PRIORITIES)))
             ->orderBy('created_at', 'desc');
@@ -33,6 +35,13 @@ class TicketController extends Controller
 
         if ($request->filled('priority')) {
             $query->where('priority', $request->priority);
+        }
+
+        // Antrian: belum diambil siapa pun / ditangani saya
+        if ($request->input('queue') === 'unclaimed') {
+            $query->whereNull('assigned_to')->whereIn('status', TicketSla::RUNNING_STATUSES);
+        } elseif ($request->input('queue') === 'mine') {
+            $query->where('assigned_to', $user->id);
         }
 
         if ($request->input('sla') === 'breached') {
@@ -56,7 +65,7 @@ class TicketController extends Controller
 
         $tickets = $query->paginate(15)->withQueryString();
         $categories = TicketCategory::active()->orderBy('name')->get();
-        $openCount = Ticket::where('status', 'open')->count();
+        $openCount = Ticket::visibleTo($user)->where('status', 'open')->whereNull('assigned_to')->count();
 
         return view('tickets.index', compact('tickets', 'categories', 'openCount'));
     }
@@ -134,6 +143,21 @@ class TicketController extends Controller
 
         return redirect()->route('tickets.show', $ticket)
             ->with('success', 'Tiket ditugaskan ke '.$handler->name.'. Job plan otomatis masuk ke Tugas Masuk miliknya.');
+    }
+
+    /** Teknisi tim IT site mengambil tiket dari antrian / mengambil alih tiket rekan yang cuti */
+    public function claim(Ticket $ticket, TicketWorkflow $workflow)
+    {
+        $this->authorize('claim', $ticket);
+
+        try {
+            $workflow->claim($ticket, Auth::user());
+        } catch (TicketWorkflowException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+
+        return redirect()->route('tickets.show', $ticket)
+            ->with('success', 'Tiket diambil. Job Plan otomatis masuk ke Rencana untuk Saya.');
     }
 
     public function updateStatus(Request $request, Ticket $ticket, TicketWorkflow $workflow)

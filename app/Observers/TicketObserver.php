@@ -31,5 +31,11 @@ class TicketObserver
                 'is_read' => false,
             ]);
         }
+
+        // Tim IT site (semua level) bisa langsung mengambil; tiket yang butuh persetujuan diumumkan setelah diverifikasi
+        if (! $ticket->awaitingApproval()) {
+            app(TicketWorkflow::class)->announceToQueue($ticket,
+                'Tiket baru di antrian'.($ticket->jobSite ? ' '.$ticket->jobSite->name : '').': ['.$ticket->ticket_number.'] '.$ticket->title);
+        }
     }
 }

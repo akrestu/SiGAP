@@ -1,4 +1,19 @@
-{{-- Aksi tim IT pada tiket: assign/alihkan & ubah status. Di-include 2x (sheet mobile, panel desktop) → $sfx membedakan id. --}}
+{{-- Aksi tim IT pada tiket: ambil sendiri, assign/alihkan & ubah status. Di-include 2x (sheet mobile, panel desktop) → $sfx membedakan id. --}}
+@if ($canClaim)
+    <form action="{{ route('tickets.claim', $ticket) }}" method="POST" class="mb-4">
+        @csrf
+        <p class="sg-section-label">{{ $ticket->assigned_to ? 'Ambil alih' : 'Antrian tim IT' }}</p>
+        <p class="small text-muted">
+            @if ($ticket->assigned_to)
+                {{ $ticket->assignedUser->name }} sedang cuti s.d. {{ \App\Support\Format::date($ticket->assignedUser->away_until) }}. Ambil alih agar tiket tetap berjalan.
+            @else
+                Belum ada yang menangani. Ambil tiket ini untuk langsung mengerjakannya; Job Plan dibuat otomatis untuk Anda.
+            @endif
+        </p>
+        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-hand-index" aria-hidden="true"></i> {{ $ticket->assigned_to ? 'Ambil alih tiket' : 'Ambil tiket' }}</button>
+    </form>
+@endif
+
 @if ($canAssign)
     <form action="{{ route('tickets.assign', $ticket) }}" method="POST" class="mb-4">
         @csrf
@@ -11,7 +26,7 @@
             <option value="">Pilih anggota tim</option>
             @foreach ($eligibleHandlers as $handler)
                 <option value="{{ $handler->id }}" @disabled($ticket->assigned_to === $handler->id)>
-                    {{ $handler->name }} ({{ $handler->role->name ?? '-' }}){{ $ticket->assigned_to === $handler->id ? ' — saat ini' : '' }}
+                    {{ $handler->name }} ({{ $handler->role->name ?? '-' }}){{ $ticket->assigned_to === $handler->id ? ' — saat ini' : '' }}{{ $handler->isAway() ? ' — cuti s.d. '.\App\Support\Format::date($handler->away_until) : '' }}
                 </option>
             @endforeach
         </select>

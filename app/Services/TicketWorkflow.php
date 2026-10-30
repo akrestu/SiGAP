@@ -6,13 +6,16 @@ use App\Exceptions\TicketWorkflowException;
 use App\Models\DailyReport;
 use App\Models\JobPlan;
 use App\Models\Notification;
+use App\Models\SlaPolicy;
 use App\Models\Ticket;
 use App\Models\TicketComment;
 use App\Models\TicketStatusHistory;
 use App\Models\User;
 use App\Policies\TicketPolicy;
+use App\Support\Format;
 use App\Support\WorkingCalendar;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -53,6 +56,13 @@ class TicketWorkflow
         ], true);
     }
 
+    /** Bisa diambil dari antrian: belum ada penangan, atau penangannya sedang cuti */
+    public static function canBeClaimed(Ticket $ticket): bool
+    {
+        return self::canBeAssigned($ticket)
+            && ($ticket->assigned_to === null || (bool) $ticket->assignedUser?->isAway());
+    }
+
     public function recordCreated(Ticket $ticket): void
     {
         $this->record($ticket, null, Ticket::STATUS_OPEN, $ticket->requesterUser, $ticket->requester_name);
@@ -61,7 +71,7 @@ class TicketWorkflow
     /**
      * Assign atau alihkan (reassign) tiket ke teknisi. Job Plan yang masih aktif ikut dialihkan.
      */
-    public function assign(Ticket $ticket, User $handler, string $dueDate, User $actor): void
+    public function assign(Ticket $ticket, User $handler, string $dueDate, User $actor, ?string $note = null): void
     {
         if ($ticket->awaitingApproval()) {
             throw new TicketWorkflowException('Tiket belum bisa di-assign: persetujuan atasan belum diverifikasi.');
@@ -70,7 +80,7 @@ class TicketWorkflow
             throw new TicketWorkflowException('Tiket dengan status "'.$ticket->status_label.'" tidak dapat di-assign.');
         }
 
-        DB::transaction(function () use ($ticket, $handler, $dueDate, $actor) {
+        DB::transaction(function () use ($ticket, $handler, $dueDate, $actor, $note) {
             $isReassign = $ticket->assigned_to !== null;
             $jobPlan = $ticket->jobPlan;
 
@@ -108,11 +118,112 @@ class TicketWorkflow
             $ticket->setRelation('assignedUser', $handler);
 
             $this->record($ticket, $from, $ticket->status, $actor, $actor->name,
-                ($isReassign ? 'Dialihkan ke ' : 'Ditugaskan ke ').$handler->name);
+                $note ?? ($isReassign ? 'Dialihkan ke ' : 'Ditugaskan ke ').$handler->name);
 
             $this->notify($handler, $ticket, 'Tiket ['.$ticket->ticket_number.'] ditugaskan kepada Anda: '.$ticket->title, $actor);
             $this->notify($ticket->requesterUser, $ticket, 'Tiket ['.$ticket->ticket_number.'] sedang ditangani oleh '.$handler->name.'.', $actor);
         });
+    }
+
+    /**
+     * Teknisi mengambil tiket dari antrian (tanpa menunggu triager), atau mengambil alih tiket rekan yang sedang cuti.
+     * Baris tiket dikunci agar dua teknisi tidak mengambil tiket yang sama bersamaan.
+     */
+    public function claim(Ticket $ticket, User $handler): void
+    {
+        DB::transaction(function () use ($ticket, $handler) {
+            $current = Ticket::whereKey($ticket->id)->lockForUpdate()->value('assigned_to');
+            if ($current !== $ticket->assigned_to) {
+                $ticket->refresh();
+                throw new TicketWorkflowException('Tiket ini baru saja diambil oleh '.($ticket->assignedUser->name ?? 'anggota tim lain').'.');
+            }
+            if (! self::canBeClaimed($ticket)) {
+                throw new TicketWorkflowException($ticket->assigned_to
+                    ? 'Tiket sudah ditangani '.$ticket->assignedUser->name.'.'
+                    : 'Tiket dengan status "'.$ticket->status_label.'" tidak dapat diambil.');
+            }
+
+            $previous = $ticket->assignedUser;
+            $activePlan = $ticket->jobPlan?->status === 'assigned' ? $ticket->jobPlan : null;
+            $dueDate = $activePlan?->due_date?->max(today())
+                ?? ($ticket->resolution_due_at?->gte(today()) ? $ticket->resolution_due_at : today()->addDays(3));
+
+            $this->assign($ticket, $handler, $dueDate->toDateString(), $handler, $previous
+                ? 'Diambil alih oleh '.$handler->name.' dari '.$previous->name.' (sedang cuti)'
+                : 'Diambil dari antrian oleh '.$handler->name);
+
+            $this->notify($previous, $ticket, 'Tiket ['.$ticket->ticket_number.'] diambil alih oleh '.$handler->name.' selama Anda cuti.', $handler);
+        });
+    }
+
+    /**
+     * Beri tahu tim IT site bahwa tiket siap diambil (tiket baru tanpa persetujuan / persetujuan baru diverifikasi).
+     * Triager sudah mendapat notifikasi tiket baru, jadi dilewati di sini.
+     */
+    public function announceToQueue(Ticket $ticket, string $message): void
+    {
+        if (! $ticket->allowsSelfClaim()) {
+            return;
+        }
+
+        $this->siteTeam($ticket)
+            ->reject(fn (User $u) => TicketPolicy::isTriager($u))
+            ->each(fn (User $u) => $this->notify($u, $ticket, $message, $ticket->requesterUser, 'ticket_created'));
+    }
+
+    /** Teknisi mulai cuti: tim site + triager diberi tahu tiket aktifnya yang bisa diambil alih. Return jumlah tiket. */
+    public function announceHandlerAway(User $handler): int
+    {
+        $tickets = Ticket::with('jobSite')
+            ->where('assigned_to', $handler->id)
+            ->whereIn('status', [Ticket::STATUS_ASSIGNED, Ticket::STATUS_IN_PROGRESS, Ticket::STATUS_PENDING])
+            ->get();
+
+        foreach ($tickets as $ticket) {
+            $message = $handler->name.' cuti s.d. '.Format::date($handler->away_until)
+                .'. Tiket ['.$ticket->ticket_number.'] bisa diambil alih: '.$ticket->title;
+            $this->siteTeam($ticket)->merge($this->triagers())->unique('id')
+                ->each(fn (User $u) => $this->notify($u, $ticket, $message, $handler));
+        }
+
+        return $tickets->count();
+    }
+
+    /**
+     * Eskalasi tiket yang belum diambil siapa pun saat waktu SLA respons sudah terpakai separuh (config tickets.escalate_at):
+     * tim IT site + triager (lead) diberi tahu, sekali per tiket. Return jumlah tiket yang dieskalasi.
+     */
+    public function escalateUnclaimed(): int
+    {
+        $policies = SlaPolicy::all()->keyBy('priority');
+        $threshold = (float) config('tickets.escalate_at', 0.5);
+
+        $tickets = Ticket::with('jobSite')
+            ->where('status', Ticket::STATUS_OPEN)
+            ->whereNull('assigned_to')
+            ->whereNull('escalated_at')
+            ->whereNull('first_responded_at')
+            ->whereNull('sla_paused_at')
+            ->where('response_due_at', '>', now())
+            ->get()
+            ->filter(function (Ticket $ticket) use ($policies, $threshold) {
+                $total = $policies[$ticket->priority]->response_minutes ?? null;
+
+                return $total && WorkingCalendar::workingMinutesBetween(now(), $ticket->response_due_at) <= $total * (1 - $threshold);
+            });
+
+        foreach ($tickets as $ticket) {
+            $ticket->forceFill(['escalated_at' => now()])->saveQuietly();
+            $this->record($ticket, $ticket->status, $ticket->status, null, 'Sistem', 'Eskalasi: tiket belum diambil siapa pun.');
+
+            $remaining = TicketSla::formatMinutes(WorkingCalendar::workingMinutesBetween(now(), $ticket->response_due_at));
+            $message = 'Eskalasi: tiket ['.$ticket->ticket_number.'] ('.$ticket->priority_label.') belum diambil siapa pun, sisa SLA respons '
+                .$remaining.'. '.$ticket->title;
+            $this->siteTeam($ticket)->merge($this->triagers())->unique('id')
+                ->each(fn (User $u) => $this->notify($u, $ticket, $message, null));
+        }
+
+        return $tickets->count();
     }
 
     /**
@@ -303,6 +414,10 @@ class TicketWorkflow
         $this->notify($ticket->requesterUser, $ticket, $approved
             ? 'Persetujuan atasan untuk tiket ['.$ticket->ticket_number.'] telah diverifikasi. Tiket akan segera ditangani.'
             : 'Bukti persetujuan tiket ['.$ticket->ticket_number.'] ditolak: '.$note.'. Silakan unggah ulang.', $actor);
+
+        if ($approved && $ticket->assigned_to === null) {
+            $this->announceToQueue($ticket, 'Tiket ['.$ticket->ticket_number.'] sudah disetujui atasan dan siap diambil: '.$ticket->title);
+        }
     }
 
     /**
@@ -371,8 +486,9 @@ class TicketWorkflow
         $label = $kind === 'response' ? 'respons' : 'penyelesaian';
         $message = 'SLA '.$label.' tiket ['.$ticket->ticket_number.'] terlewat ('.$ticket->priority_label.'): '.$ticket->title;
 
-        User::with(['role', 'department'])->get()
-            ->filter(fn (User $u) => $u->id === $ticket->assigned_to || TicketPolicy::isTriager($u))
+        // Belum ada penangan → seluruh tim IT site ikut diberi tahu (siapa pun bisa mengambil)
+        $recipients = $ticket->assignedUser ? collect([$ticket->assignedUser]) : $this->siteTeam($ticket);
+        $recipients->merge($this->triagers())->unique('id')
             ->each(fn (User $user) => $this->notify($user, $ticket, $message, null));
     }
 
@@ -506,16 +622,31 @@ class TicketWorkflow
         ]);
     }
 
-    private function notify(?User $recipient, Ticket $ticket, string $message, ?User $actor): void
+    /** Tim IT yang mencakup site tiket dan tidak sedang cuti */
+    private function siteTeam(Ticket $ticket): Collection
     {
-        if (! $recipient || $recipient->id === $actor?->id || ! $recipient->wantsNotification('ticket_updated')) {
+        return User::with(['role', 'department', 'extraJobSites'])
+            ->whereHas('department', fn ($q) => $q->handlesTickets())
+            ->get()
+            ->filter(fn (User $u) => TicketPolicy::coversTicketSite($u, $ticket) && ! $u->isAway());
+    }
+
+    private function triagers(): Collection
+    {
+        return User::with(['role', 'department'])->get()
+            ->filter(fn (User $u) => TicketPolicy::isTriager($u) && ! $u->isAway());
+    }
+
+    private function notify(?User $recipient, Ticket $ticket, string $message, ?User $actor, string $type = 'ticket_updated'): void
+    {
+        if (! $recipient || $recipient->id === $actor?->id || ! $recipient->wantsNotification($type)) {
             return;
         }
 
         Notification::create([
             'user_id' => $recipient->id,
             'ticket_id' => $ticket->id,
-            'type' => 'ticket_updated',
+            'type' => $type,
             'message' => $message,
             'is_read' => false,
         ]);

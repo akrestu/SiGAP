@@ -3,21 +3,28 @@
     $statusChips = collect(['' => 'Semua'] + collect(config('sigap-ui.ticket_status'))->map(fn ($s) => $s['label'])->all())
         ->map(fn ($label, $value) => ['label' => $label, 'href' => route('tickets.index', array_filter(['status' => $value] + request()->except('status', 'page'))), 'active' => (string) request('status') === (string) $value])
         ->values()->all();
+    $queueChips = collect(['' => 'Semua tiket', 'unclaimed' => 'Belum diambil', 'mine' => 'Ditangani saya'])
+        ->map(fn ($label, $value) => ['label' => $label, 'href' => route('tickets.index', array_filter(['queue' => $value] + request()->except('queue', 'page'))), 'active' => (string) request('queue') === (string) $value])
+        ->values()->all();
     $canDelete = auth()->user()->can('deleteAny', App\Models\Ticket::class);
 @endphp
 
 <x-app-layout title="Tiket Masuk">
-    <x-sg.page-header title="Tiket Masuk" :subtitle="$openCount ? $openCount.' tiket baru belum ditangani' : 'Semua tiket baru sudah ditangani'">
+    <x-sg.page-header title="Tiket Masuk" :subtitle="$openCount ? $openCount.' tiket baru belum diambil' : 'Semua tiket baru sudah diambil'">
         <x-slot:actions>
-            <a href="{{ route('tickets.dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-graph-up" aria-hidden="true"></i> Dashboard</a>
+            @can('viewDashboard', App\Models\Ticket::class)
+                <a href="{{ route('tickets.dashboard') }}" class="btn btn-outline-secondary"><i class="bi bi-graph-up" aria-hidden="true"></i> Dashboard</a>
+            @endcan
             <a href="{{ route('tickets.public.form') }}" target="_blank" rel="noopener" class="btn btn-outline-secondary"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> Form publik</a>
         </x-slot:actions>
     </x-sg.page-header>
 
+    <x-sg.chip-filter class="mb-2" label="Antrian" :items="$queueChips" />
     <x-sg.chip-filter class="mb-3" label="Status tiket" :items="$statusChips" />
 
     <form method="GET" action="{{ route('tickets.index') }}" class="sg-filter-bar mb-3" role="search" aria-label="Saring tiket">
         @if (request('status'))<input type="hidden" name="status" value="{{ request('status') }}">@endif
+        @if (request('queue'))<input type="hidden" name="queue" value="{{ request('queue') }}">@endif
         <div class="sg-filter-bar__search"><x-sg.search name="search" placeholder="Cari tiket, nama, departemen" /></div>
         <label for="t-priority" class="visually-hidden">Prioritas</label>
         <select id="t-priority" name="priority" class="form-select">
@@ -40,7 +47,7 @@
         </select>
         <button type="submit" class="btn btn-primary">Terapkan</button>
         @if (request()->hasAny(['search', 'priority', 'category', 'sla']))
-            <a href="{{ route('tickets.index', array_filter(['status' => request('status')])) }}" class="btn btn-quiet">Reset</a>
+            <a href="{{ route('tickets.index', array_filter(['status' => request('status'), 'queue' => request('queue')])) }}" class="btn btn-quiet">Reset</a>
         @endif
     </form>
 

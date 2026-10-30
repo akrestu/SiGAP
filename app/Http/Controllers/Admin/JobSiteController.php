@@ -67,6 +67,7 @@ class JobSiteController extends Controller
         ]);
 
         $validated['is_active'] = $request->boolean('is_active');
+        $validated['ticket_self_claim'] = $request->boolean('ticket_self_claim', true);
 
         $jobSite = JobSite::create($validated);
 
@@ -115,6 +116,7 @@ class JobSiteController extends Controller
         ]);
 
         $validated['is_active'] = $request->boolean('is_active');
+        $validated['ticket_self_claim'] = $request->boolean('ticket_self_claim', true);
 
         $jobSite->update($validated);
 

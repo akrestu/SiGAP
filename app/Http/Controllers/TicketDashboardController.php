@@ -20,7 +20,7 @@ class TicketDashboardController extends Controller
 
     public function index(Request $request)
     {
-        $this->authorize('viewAny', Ticket::class);
+        $this->authorize('viewDashboard', Ticket::class);
 
         $validated = $request->validate([
             'period' => 'nullable|in:'.implode(',', array_keys(self::PERIODS)),

@@ -16,6 +16,7 @@ class JobSite extends Model
         'description',
         'location',
         'is_active',
+        'ticket_self_claim',
     ];
 
     /**
@@ -25,6 +26,7 @@ class JobSite extends Model
     {
         return [
             'is_active' => 'boolean',
+            'ticket_self_claim' => 'boolean',
         ];
     }
 

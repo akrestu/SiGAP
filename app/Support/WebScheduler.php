@@ -23,6 +23,7 @@ class WebScheduler
             'tickets:sla-check' => [300, function () {
                 $workflow = app(TicketWorkflow::class);
                 app(TicketSla::class)->evaluateBreaches()->each(fn ($breach) => $workflow->notifySlaBreach(...$breach));
+                $workflow->escalateUnclaimed();
             }],
             'tickets:auto-close' => [3600, fn () => app(TicketWorkflow::class)->autoCloseResolved()],
             'notifications:cleanup' => [86400, fn () => Artisan::call('notifications:cleanup', ['--force' => true])],

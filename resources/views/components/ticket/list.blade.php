@@ -19,6 +19,7 @@
                     <x-sg.badge-priority :value="$ticket->priority" code />
                     @if ($agent)@include('tickets.partials.sla-badge')@endif
                     @if ($ticket->awaitingApproval())<x-sg.badge-status type="ticket_approval" :value="$ticket->approval_status" />@endif
+                    @if ($agent && $ticket->assignedUser?->isAway())<span class="sg-badge sg-badge--pending">Penangan cuti</span>@endif
                 </div>
             </x-sg.list-card>
         @endforeach
@@ -58,7 +59,10 @@
                     <x-sg.badge-status type="ticket_status" :value="$ticket->status" />
                     @if ($ticket->awaitingApproval())<div class="mt-1"><x-sg.badge-status type="ticket_approval" :value="$ticket->approval_status" /></div>@endif
                 </td>
-                <td class="text-nowrap">{{ $ticket->assignedUser?->name ?? '—' }}</td>
+                <td class="text-nowrap">
+                    {{ $ticket->assignedUser?->name ?? '—' }}
+                    @if ($agent && $ticket->assignedUser?->isAway())<span class="sg-badge sg-badge--pending ms-1" title="Penangan sedang cuti, tiket bisa diambil alih">Cuti</span>@endif
+                </td>
                 @if ($agent)<td>@include('tickets.partials.sla-badge')</td>@endif
                 <td class="sg-num text-nowrap">{{ \App\Support\Format::date($ticket->created_at) }}</td>
             </tr>

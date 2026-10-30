@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Ticket;
 use App\Models\User;
+use App\Services\TicketWorkflow;
 
 class TicketPolicy
 {
@@ -18,6 +19,24 @@ class TicketPolicy
 
         return (bool) $user->department?->handles_tickets
             && $user->getRoleLevel() >= config('tickets.triage_min_level');
+    }
+
+    /** Anggota tim layanan tiket (semua level) atau triager: bisa melihat antrian site-nya & mengambil tiket */
+    public static function isHandler(User $user): bool
+    {
+        return self::isTriager($user) || (bool) $user->department?->handles_tickets;
+    }
+
+    /** Tiket termasuk site yang dicakup user. Tiket tanpa site / user tanpa site = tidak dibatasi site. */
+    public static function coversTicketSite(User $user, Ticket $ticket): bool
+    {
+        return $ticket->job_site_id === null || ! $user->hasJobSites() || $user->coversJobSite($ticket->job_site_id);
+    }
+
+    /** Tim IT site tiket (bukan hanya yang ditugaskan) */
+    private static function isSiteTeam(User $user, Ticket $ticket): bool
+    {
+        return self::isHandler($user) && self::coversTicketSite($user, $ticket);
     }
 
     /**
@@ -47,6 +66,11 @@ class TicketPolicy
 
     public function viewAny(User $user): bool
     {
+        return self::isHandler($user);
+    }
+
+    public function viewDashboard(User $user): bool
+    {
         return self::isTriager($user);
     }
 
@@ -54,12 +78,25 @@ class TicketPolicy
     {
         return self::isTriager($user)
             || $ticket->assigned_to === $user->id
-            || $ticket->requester_user_id === $user->id;
+            || $ticket->requester_user_id === $user->id
+            || self::isSiteTeam($user, $ticket);
     }
 
     public function assign(User $user): bool
     {
         return self::isTriager($user);
+    }
+
+    /**
+     * Ambil sendiri dari antrian: tim IT site tiket (semua level), bila site tidak memakai mode dispatcher.
+     * Tiket yang penanganannya sedang cuti boleh diambil alih.
+     */
+    public function claim(User $user, Ticket $ticket): bool
+    {
+        return self::isSiteTeam($user, $ticket)
+            && $ticket->assigned_to !== $user->id
+            && ($ticket->allowsSelfClaim() || self::isTriager($user))
+            && TicketWorkflow::canBeClaimed($ticket);
     }
 
     public function updateStatus(User $user, Ticket $ticket): bool
@@ -76,7 +113,7 @@ class TicketPolicy
     /** Tim IT (triager / handler) boleh melihat & menulis catatan internal */
     public function viewInternal(User $user, Ticket $ticket): bool
     {
-        return self::isTriager($user) || $ticket->assigned_to === $user->id;
+        return self::isTriager($user) || $ticket->assigned_to === $user->id || self::isSiteTeam($user, $ticket);
     }
 
     /** Pemohon: konfirmasi selesai, buka kembali, atau batalkan tiketnya sendiri */

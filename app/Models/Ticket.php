@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Policies\TicketPolicy;
 use App\Services\TicketSla;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -156,6 +157,7 @@ class Ticket extends Model
             'csat_submitted_at' => 'datetime',
             'response_breached' => 'boolean',
             'resolution_breached' => 'boolean',
+            'escalated_at' => 'datetime',
         ];
     }
 
@@ -183,6 +185,27 @@ class Ticket extends Model
     public function awaitingApproval(): bool
     {
         return $this->approval_status !== null && $this->approval_status !== self::APPROVAL_APPROVED;
+    }
+
+    /** Site mengizinkan teknisi mengambil tiket sendiri (false = mode dispatcher, mis. HO/RO). Tiket tanpa site: diizinkan. */
+    public function allowsSelfClaim(): bool
+    {
+        return $this->jobSite?->ticket_self_claim ?? true;
+    }
+
+    /**
+     * Tiket yang terlihat oleh user di Tiket Masuk: triager melihat semua; anggota tim IT melihat tiket
+     * di site yang dicakupnya (plus tiket tanpa site & yang ditugaskan kepadanya). User tanpa site = semua site.
+     */
+    public function scopeVisibleTo($query, User $user)
+    {
+        if (TicketPolicy::isTriager($user) || ! $user->hasJobSites()) {
+            return $query;
+        }
+
+        return $query->where(fn ($q) => $q->where('assigned_to', $user->id)
+            ->orWhereNull('job_site_id')
+            ->orWhereIn('job_site_id', $user->jobSiteIds()));
     }
 
     /** Survei kepuasan: sekali, setelah tiket ditutup (bukan dibatalkan) */

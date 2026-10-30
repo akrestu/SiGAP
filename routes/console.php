@@ -20,8 +20,9 @@ Schedule::command('tickets:auto-close')->hourly()->withoutOverlapping();
 Artisan::command('tickets:sla-check', function (TicketSla $sla, TicketWorkflow $workflow) {
     $breaches = $sla->evaluateBreaches();
     $breaches->each(fn ($breach) => $workflow->notifySlaBreach(...$breach));
-    $this->info($breaches->count().' pelanggaran SLA baru.');
-})->purpose('Tandai & beri notifikasi tiket yang melewati tenggat SLA');
+    $escalated = $workflow->escalateUnclaimed();
+    $this->info($breaches->count().' pelanggaran SLA baru, '.$escalated.' tiket belum diambil dieskalasi.');
+})->purpose('Tandai & beri notifikasi tiket yang melewati tenggat SLA, eskalasi tiket yang belum diambil');
 
 Schedule::command('tickets:sla-check')->everyFiveMinutes()->withoutOverlapping();
 

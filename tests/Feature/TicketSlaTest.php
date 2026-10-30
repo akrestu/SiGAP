@@ -140,7 +140,8 @@ class TicketSlaTest extends TestCase
 
         $this->assertTrue($ticket->fresh()->response_breached);
         $this->assertSame(1, Notification::where('user_id', $this->lead->id)->where('message', 'like', '%SLA respons%')->count());
-        $this->assertSame(0, Notification::where('user_id', $this->tech->id)->count(), 'Teknisi non-triager belum terkait tiket');
+        // Tiket belum diambil → tim IT site (semua level) ikut diberi tahu, tetap sekali
+        $this->assertSame(1, Notification::where('user_id', $this->tech->id)->where('message', 'like', '%SLA respons%')->count());
 
         $this->actingAs($this->lead)->get(route('tickets.index', ['sla' => 'breached']))->assertSee($ticket->ticket_number);
     }
